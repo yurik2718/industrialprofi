@@ -31,22 +31,50 @@ class Admin::DashboardControllerTest < ActionDispatch::IntegrationTest
     assert_match I18n.t("admin.dashboard.signups_chart"), response.body
   end
 
+  test "renders both the signups and completions charts" do
+    sign_in_as users(:admin)
+    get admin_root_path
+    assert_match I18n.t("admin.dashboard.signups_chart"), response.body
+    assert_match I18n.t("admin.dashboard.completions_chart"), response.body
+  end
+
+  test "admin pages drop the public marketing footer" do
+    sign_in_as users(:admin)
+    get admin_root_path
+    assert_no_match "footer__inner", response.body
+  end
+
   test "pending suggestions callout links to the moderation queue" do
     sign_in_as users(:admin)
     get admin_root_path
     assert_match I18n.t("admin.dashboard.review_now"), response.body
   end
 
-  test "the disk-safety card renders" do
+  test "show embeds the vitals frame" do
     sign_in_as users(:admin)
     get admin_root_path
+    assert_match admin_dashboard_vitals_path, response.body
+  end
+
+  # ── Vitals: the disk/mail/jobs cards load in their own frame ──
+
+  test "vitals requires admin" do
+    sign_in_as users(:member)
+    get admin_dashboard_vitals_path
+    assert_redirected_to root_path
+  end
+
+  test "the disk-safety card renders in the vitals frame" do
+    sign_in_as users(:admin)
+    get admin_dashboard_vitals_path
+    assert_response :success
     assert_match I18n.t("admin.dashboard.disk_free"), response.body
     assert_match "База данных", response.body
   end
 
-  test "the mail-flow card renders" do
+  test "the mail-flow card renders in the vitals frame" do
     sign_in_as users(:admin)
-    get admin_root_path
+    get admin_dashboard_vitals_path
     assert_match I18n.t("admin.dashboard.emails_week"), response.body
   end
 

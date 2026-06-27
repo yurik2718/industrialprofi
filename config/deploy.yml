@@ -5,15 +5,24 @@ service: industrialprofi
 image: andreiyurik/industrialprofi
 
 # Deploy to these servers.
+# The IP is read from the local shell (not committed): this is a public repo, and
+# keeping the origin IP out of git history avoids burning it if a CDN is added
+# later. Set it once: `export KAMAL_WEB_IP=...` in your ~/.bashrc (see docs/DEPLOY.md).
 servers:
   web:
-    - 192.168.0.1 # TODO: replace with the VPS public IP (see docs/DEPLOY.md, step 2)
+    - <%= ENV.fetch("KAMAL_WEB_IP") %>
 
 # SSL auto certification via Let's Encrypt (kamal-proxy terminates SSL;
 # production.rb has assume_ssl + force_ssl on to match).
 proxy:
   ssl: true
   host: industrialprofi.com
+
+# Branded error pages served BY kamal-proxy (not the app), so they show even when
+# the app container is stopped. Kamal uploads only files matching {4??,5??}.html
+# from this dir. public/503.html is the "техническое обслуживание" page shown by
+# `bin/kamal app maintenance` (proxy returns 503 → search engines keep our SEO).
+error_pages_path: public
 
 # Where you keep your container images. GHCR is free for public repos.
 registry:
@@ -52,6 +61,16 @@ env:
     # redeploy. The app then auto-pings on every published content change and
     # serves the proof file at /<key>.txt. Blank = pinging off.
     # INDEXNOW_KEY: "..."
+
+    # Direct-transfer requisites shown on /support_us (no platform fee). Blank →
+    # the "Перевести напрямую" block is hidden. ⚠️ These numbers are PUBLIC on the
+    # page, but if you uncomment them HERE they also land in git — fine for a
+    # private deploy repo, NOT for the public mirror. For the public repo, set them
+    # on the server's environment instead. Tip: use a dedicated/virtual card.
+    # YOOMONEY_WALLET: "4100 11XX XXXX XXXX"
+    # YOOMONEY_URL: "https://yoomoney.ru/to/410011XXXXXXXXX"
+    # CARD_NUMBER: "2200 XXXX XXXX XXXX"
+    # CARD_BANK: "Т-Банк"
 
     # Set number of processes dedicated to Solid Queue (default: 1)
     # JOB_CONCURRENCY: 3

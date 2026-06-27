@@ -64,6 +64,7 @@ Rails.application.routes.draw do
 
   namespace :admin do
     root "dashboard#show"
+    get "dashboard/vitals" => "dashboard#vitals", as: :dashboard_vitals
     resources :lessons, only: [ :index, :new, :create, :edit, :update, :destroy ], param: :slug do
       resources :revisions, only: [ :index ] do
         member { post :rollback }
@@ -97,5 +98,8 @@ Rails.application.routes.draw do
       end
     end
     post "preview", to: "preview#create"
+    # Editor/admin-only image uploads for lesson rich text — a gated, validating
+    # replacement for the open ActiveStorage direct-upload endpoint.
+    resources :uploads, only: :create
   end
 end

@@ -1,6 +1,12 @@
 module ApplicationHelper
   include Heroicon::Engine.helpers
 
+  # Admin is a focused internal workspace, not a marketing surface — it drops the
+  # public footer (its persistent nav covers navigation).
+  def in_admin?
+    controller.is_a?(Admin::BaseController)
+  end
+
   # Profession icons: self-hosted Tabler (https://tabler.io/icons) line glyphs,
   # rendered inline so they inherit `currentColor` and the monochrome theme.
   # Each token maps to a partial in app/views/shared/icons/.
@@ -82,14 +88,23 @@ module ApplicationHelper
       syntax_highlighter: "rouge",
       syntax_highlighter_opts: { formatter: RougeFormatter }).to_html
     html = sanitize(html, tags: MARKDOWN_TAGS, attributes: MARKDOWN_ATTRS)
-    # Post-sanitize enrichments — our own markup, so the sanitizer needs no <div>
-    # allowance: typed callouts first, then wrap tables for horizontal scroll.
+    enrich_prose(html, anchor_headings: anchor_headings).html_safe
+  end
+
+  # The shared post-sanitize prose pipeline, applied to BOTH the markdown path
+  # (AI/imported content) and rendered rich text (a lesson edited in Lexxy). It
+  # operates on already-sanitized HTML and only ADDS our own trusted markup, so a
+  # `> [!ВАЖНО]` quote becomes a coloured callout, code blocks get copy-buttons,
+  # tables scroll, and `## ` headings get anchors — identically, whichever editor
+  # produced the section. A blockquote whose first line isn't a known marker is
+  # left untouched, so plain quotes still work.
+  def enrich_prose(html, anchor_headings: false)
     html = render_callouts(html)
     html = wrap_prose_tables(html)
     html = wrap_code_blocks(html)
     html = wrap_figures(html)
     html = anchor_prose_headings(html) if anchor_headings
-    html.html_safe
+    html
   end
 
   # IDs for the in-body ## headings so the lesson TOC can deep-link them.
@@ -180,6 +195,24 @@ module ApplicationHelper
     end
   end
 
+  # Whether the image variant processor (libvips via ruby-vips) can actually run
+  # here. True in production (libvips is in the Dockerfile); false on a box
+  # without the system lib (e.g. a no-sudo dev machine). The blob partial uses
+  # this to serve a resized WebP where it can and fall back to the original where
+  # it can't — so uploaded images display everywhere, not just in production.
+  # Memoised on the module (probed once per process).
+  def self.variant_processing_available?
+    return @variant_processing_available unless @variant_processing_available.nil?
+
+    @variant_processing_available =
+      begin
+        require "vips"
+        true
+      rescue LoadError
+        false
+      end
+  end
+
   # A remote-image attachment (ActionText) whose URL points at a missing asset —
   # e.g. a "TODO-*.png" placeholder an author left for an illustration not yet
   # drawn — must never 500 the whole lesson. Render a calm placeholder instead.
@@ -190,21 +223,40 @@ module ApplicationHelper
     tag.span(t("lessons.image_pending"), class: "attachment__missing")
   end
 
-  def lesson_content(lesson, field)
-    rich = lesson.send(:"rich_#{field}")
-    return rich if rich.present?
+  # Bump when the rendering pipeline (markdown/enrich_prose/callouts/…) changes,
+  # so cached HTML below is regenerated even though the lesson itself didn't
+  # change. View fragment caching gets this free via template digests; a helper
+  # cache needs it spelled out.
+  LESSON_CONTENT_RENDER_VERSION = 1
 
-    # Memoized per request: the TOC re-reads the rendered body for its anchors.
-    @lesson_markdown ||= {}
-    @lesson_markdown[[ lesson.id, field ]] ||=
-      markdown(lesson.send(field), anchor_headings: field == :body)
+  # The HTML a reader sees for a section. Rich text (Lexxy) and the markdown
+  # fallback both flow through the SAME enrichment, so callouts/code/tables/TOC
+  # anchors render the same way regardless of which editor wrote the section.
+  #
+  # Rendering is the expensive part of a lesson view (Kramdown + Nokogiri +
+  # enrichments), and a lesson is read far more than written — so the result is
+  # cached in Solid Cache, keyed on the lesson's version (an edit creates a
+  # revision, which touches the lesson, busting the key — see LessonRevision).
+  # The per-request memo stays as an L1 cache: the body is read twice (prose +
+  # TOC anchors), so this avoids even the cache round-trip the second time.
+  def lesson_content(lesson, field)
+    @lesson_content ||= {}
+    @lesson_content[[ lesson.id, field ]] ||=
+      Rails.cache.fetch([ lesson.cache_key_with_version, "lesson_content", field, LESSON_CONTENT_RENDER_VERSION ]) do
+        rich = lesson.send(:"rich_#{field}")
+        if rich.present?
+          enrich_prose(rich.to_s, anchor_headings: field == :body)
+        else
+          markdown(lesson.send(field), anchor_headings: field == :body)
+        end
+      end.to_s.html_safe
   end
 
   # Entries for the right-rail "В этом уроке" TOC: the body's ## headings.
-  # Markdown lessons only — rich_body carries no anchors, so there the rail
-  # degrades to just the fixed section links.
+  # Works for rich text and markdown alike — both now flow through enrich_prose,
+  # which anchors every <h2>, so the rail no longer degrades on edited lessons.
   def lesson_toc(lesson)
-    return [] if lesson.rich_body.present? || lesson.body.blank?
+    return [] unless lesson.has_body?
     Nokogiri::HTML5.fragment(lesson_content(lesson, :body).to_s).css("h2[id]")
       .map { |heading| { title: heading.text, anchor: heading["id"] } }
   end
