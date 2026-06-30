@@ -21,10 +21,35 @@ class PathsControllerTest < ActionDispatch::IntegrationTest
 
     get paths_path
     assert_match "Будущая профессия", response.body
-    assert_match "В планах", response.body
     assert_match "Скоро профессия", response.body
+    # Both live under the "Скоро" group, each with its own readiness badge:
+    # coming_soon → «В разработке», planned → «В планах».
     assert_match "В разработке", response.body
+    assert_match "В планах", response.body
     assert_no_match %r{href="/paths/future-prof"}, response.body, "stubs are not links"
+  end
+
+  test "index invites a profession idea alongside the upcoming stubs" do
+    Path.create!(title: "Скоро профессия", slug: "soon-prof",
+                 description: "В работе", locale: "ru", position: 22, status: "coming_soon")
+
+    get paths_path
+    assert_match I18n.t("paths.idea_card_title"), response.body
+    assert_select "a[href=?]", new_feedback_path(about: "profession", from: paths_path)
+  end
+
+  test "show credits an opted-in curator with their headline" do
+    users(:editor).update!(public_curator: true, headline: "Инженер-электрик, 12 лет")
+    get path_path(paths(:electrician))
+    assert_response :success
+    assert_match I18n.t("paths.curated_by"), response.body
+    assert_match "Инженер-электрик, 12 лет", response.body
+  end
+
+  test "show hides the curator credit when nobody opted in" do
+    get path_path(paths(:electrician))
+    assert_response :success
+    assert_no_match I18n.t("paths.curated_by"), response.body
   end
 
   test "index shows only paths in the current locale" do

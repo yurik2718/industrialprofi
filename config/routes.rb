@@ -52,6 +52,10 @@ Rails.application.routes.draw do
   resources :calculators, only: [ :index, :show ], param: :slug
   resources :journal_entries, path: "journal", except: [ :show ]
   resources :feedbacks, only: [ :new, :create ]
+  # Expert-entry gate (loop #1): a structured "become a co-author" application.
+  # Stored as a tagged Feedback for now — no separate model until volume warrants
+  # tracking application status.
+  resource :coauthor_application, only: [ :new, :create ]
 
   resources :paths, only: [ :index, :show ], param: :slug
   resources :courses, only: [ :show ], param: :slug
@@ -64,6 +68,7 @@ Rails.application.routes.draw do
 
   namespace :admin do
     root "dashboard#show"
+    get "dashboard/vitals" => "dashboard#vitals", as: :dashboard_vitals
     resources :lessons, only: [ :index, :new, :create, :edit, :update, :destroy ], param: :slug do
       resources :revisions, only: [ :index ] do
         member { post :rollback }
@@ -97,5 +102,8 @@ Rails.application.routes.draw do
       end
     end
     post "preview", to: "preview#create"
+    # Editor/admin-only image uploads for lesson rich text — a gated, validating
+    # replacement for the open ActiveStorage direct-upload endpoint.
+    resources :uploads, only: :create
   end
 end

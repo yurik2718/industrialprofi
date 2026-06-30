@@ -43,8 +43,18 @@ export KAMAL_REGISTRY_PASSWORD=ghp_...   # put it in ~/.bashrc
 
 ## 2. Config
 
-In `config/deploy.yml` replace the two TODOs: the server IP (`servers.web`) and
-the ghcr.io username. Nothing else there needs touching.
+The server IP is **not** committed (this is a public repo). `deploy.yml` reads it
+from your shell, so set it once locally:
+
+```bash
+echo 'export KAMAL_WEB_IP=82.202.158.50' >> ~/.bashrc && source ~/.bashrc
+```
+
+Every `bin/kamal` command then picks it up; if it's unset, Kamal fails fast with
+`key not found: "KAMAL_WEB_IP"` (no accidental empty target). Then in
+`config/deploy.yml` confirm the one remaining TODO — the ghcr.io username
+(`registry.username`). If your VPS logs in as something other than `root`, also
+uncomment the `ssh.user` block. Nothing else there needs touching.
 
 ## 3. First deploy
 
@@ -72,21 +82,30 @@ ADMIN_EMAIL=... ADMIN_PASSWORD=... bin/kamal app exec "bin/rails db:seed"
 
 ## 5. Right after the first deploy
 
-- **Backups — mandatory, before any real users exist.** Data lives on the host
-  in the docker volume
-  `/var/lib/docker/volumes/industrialprofi_storage/_data` (the SQLite databases).
-  At minimum, a daily cron on the server (`apt install sqlite3 rclone`):
+- **Backups — mandatory, before any real users exist.** Everything lives on the
+  host in the docker volume `/var/lib/docker/volumes/industrialprofi_storage/_data`,
+  which holds **two** kinds of data that need **two** backup rules:
+  1. the SQLite databases (`*.sqlite3`) — the whole catalog, progress, accounts;
+  2. `blobs/` — Active Storage files, i.e. editor-uploaded **lesson images**
+     (no longer ≈0 since editors can attach images to lessons).
+
+  A daily cron on the server (`apt install sqlite3 rclone`) must cover both —
+  miss the second and a restore yields lessons with broken images:
   ```bash
-  # .backup is consistent even under load (SQLite online backup API)
-  sqlite3 /var/lib/docker/volumes/industrialprofi_storage/_data/production.sqlite3 \
-    ".backup /root/backups/production-$(date +%F).sqlite3"
-  rclone sync /root/backups remote:industrialprofi-backups
+  vol=/var/lib/docker/volumes/industrialprofi_storage/_data
+  # 1. DBs: .backup is consistent even under load (SQLite online backup API).
+  for db in production production_cache production_queue production_cable; do
+    sqlite3 "$vol/$db.sqlite3" ".backup /root/backups/$db-$(date +%F).sqlite3"
+  done
+  # 2. Image blobs: plain files, a mirror is enough (separate dir, never the DBs).
+  rclone sync "$vol/blobs" remote:industrialprofi-backups/blobs
+  rclone sync /root/backups remote:industrialprofi-backups/db
   ```
-  Active Storage blobs are ≈0 (journal uploads were removed), so the SQLite
-  databases are the whole dataset. The better option is Litestream (streaming
-  SQLite replication to S3) as a Kamal accessory — set it up at the first free
-  moment. A backup you've never restored isn't a backup — restore a dump locally
-  once a quarter.
+  The better option for the DBs is Litestream (streaming SQLite replication to
+  S3) as a Kamal accessory — but note **Litestream replicates only the SQLite
+  databases, not `blobs/`**, so the `rclone sync` of `blobs/` stays required
+  either way. A backup you've never restored isn't a backup — restore a dump
+  (and a few blobs) locally once a quarter.
 - **External uptime monitoring:** UptimeRobot (free) on
   `https://industrialprofi.com/up`, alerting to email/Telegram. Internal error
   monitoring is already built in (`lib/error_subscriber.rb` emails admins).
@@ -104,4 +123,29 @@ bin/kamal rollback     # roll back to the previous image if a deploy is bad
 ```
 
 The rule from VISION: ship weekly — a deploy is routine, not an event.
+
+## Maintenance mode (server migrations)
+
+When you move to a new server — or do any work that takes the app offline — turn
+on maintenance mode FIRST. This is Kamal's built-in feature: kamal-proxy returns
+HTTP **503** to every request and serves our branded `public/503.html`
+("техническое обслуживание"). The 503 status tells Google the outage is
+*temporary*, so search rankings survive — a normal 200 "we're down" page is what
+gets a site dropped from the index.
+
+```bash
+bin/kamal app maintenance     # ON  — proxy serves 503.html; the app can be stopped
+bin/kamal app live            # OFF — back to normal
+```
+
+Why this beats a Rails-level page: the 503 comes from **kamal-proxy**, not the app,
+so it keeps showing even while the app container is stopped — exactly the case
+during a migration. The page is wired via `error_pages_path: public` in
+`deploy.yml`; Kamal uploads `public/503.html` (and the other `4xx`/`5xx` pages) on
+each deploy, so a one-time `bin/kamal deploy` after adding it is all the setup.
+
+Typical migration order: **maintenance** on the old server → copy the whole
+`storage/` volume (SQLite DBs **and** `blobs/`) to the new server → switch DNS →
+verify the new server → **live**.
+Holding maintenance during the copy also guarantees the DB isn't written mid-copy.
 </content>

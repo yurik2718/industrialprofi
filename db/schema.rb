@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_25_160000) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_29_140000) do
   create_table "action_text_rich_texts", force: :cascade do |t|
     t.text "body"
     t.datetime "created_at", null: false
@@ -159,8 +159,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_25_160000) do
     t.string "section", default: "body", null: false
     t.string "status", default: "pending", null: false
     t.datetime "updated_at", null: false
+    t.integer "user_id"
     t.index ["lesson_id"], name: "index_lesson_suggestions_on_lesson_id"
     t.index ["status"], name: "index_lesson_suggestions_on_status"
+    t.index ["user_id"], name: "index_lesson_suggestions_on_user_id"
   end
 
   create_table "lessons", force: :cascade do |t|
@@ -193,6 +195,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_25_160000) do
     t.datetime "created_at", null: false
     t.text "description"
     t.string "imported_digest"
+    t.string "kind", default: "role", null: false
     t.integer "lessons_count", default: 0, null: false
     t.string "locale", default: "ru", null: false
     t.string "origin", default: "human", null: false
@@ -219,7 +222,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_25_160000) do
     t.boolean "required", default: false, null: false
     t.string "title", null: false
     t.datetime "updated_at", null: false
-    t.string "url", null: false
+    t.string "url"
     t.index ["lesson_id", "position"], name: "index_resources_on_lesson_id_and_position"
     t.index ["lesson_id"], name: "index_resources_on_lesson_id"
   end
@@ -239,9 +242,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_25_160000) do
   create_table "users", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "email_address", null: false
+    t.string "headline"
     t.text "learning_goal"
     t.string "name", null: false
     t.string "password_digest", null: false
+    t.boolean "public_curator", default: false, null: false
     t.datetime "reminded_at"
     t.boolean "reminder_emails", default: true, null: false
     t.string "role", default: "member", null: false
@@ -266,6 +271,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_25_160000) do
   add_foreign_key "lesson_revisions", "lesson_suggestions"
   add_foreign_key "lesson_revisions", "lessons"
   add_foreign_key "lesson_suggestions", "lessons"
+  add_foreign_key "lesson_suggestions", "users"
   add_foreign_key "lessons", "courses"
   add_foreign_key "lessons", "paths"
   add_foreign_key "resources", "lessons"

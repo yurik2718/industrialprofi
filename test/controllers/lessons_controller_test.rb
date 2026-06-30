@@ -12,6 +12,27 @@ class LessonsControllerTest < ActionDispatch::IntegrationTest
     assert_response :not_found
   end
 
+  # ── Conditional GET (crawl efficiency / server load) ──
+
+  test "an anonymous re-request of an unchanged lesson gets a 304" do
+    get lesson_path(lessons(:pteep))
+    assert_response :success
+    last_modified = response.headers["Last-Modified"]
+    assert last_modified.present?, "expected a Last-Modified header for anonymous requests"
+
+    get lesson_path(lessons(:pteep)), headers: { "If-Modified-Since" => last_modified }
+    assert_response :not_modified
+  end
+
+  test "signed-in users always render fresh (no conditional 304)" do
+    get lesson_path(lessons(:pteep))
+    anon_last_modified = response.headers["Last-Modified"]
+
+    sign_in_as users(:member)
+    get lesson_path(lessons(:pteep)), headers: { "If-Modified-Since" => anon_last_modified }
+    assert_response :success
+  end
+
   # ── Draft visibility / editor preview ──
 
   test "a lesson in an unpublished profession is 404 for the public" do
@@ -84,6 +105,13 @@ class LessonsControllerTest < ActionDispatch::IntegrationTest
 
     get lesson_path(lessons(:pteep)) # theory lesson — task, but no journal CTA
     assert_select ".lesson-task-journal", false
+  end
+
+  test "the completion bar carries no journal link — journaling lives with the task" do
+    sign_in_as users(:member)
+    get lesson_path(lessons(:praktika_shchitok)) # even on practice
+    assert_select ".lesson-complete__journal", false
+    assert_select ".lesson-task-journal" # the one journal CTA, in the task section
   end
 
   test "edit-lesson button only shows to a user who can edit this profession" do
